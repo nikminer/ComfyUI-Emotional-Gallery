@@ -114,7 +114,8 @@ def register_routes():
     async def image(request):
         try:
             path = STORE.image_path(request.match_info["profile_id"], request.match_info["emotion"], request.query.get("thumbnail") == "1")
-            return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
+            content_type = {".png": "image/png", ".webp": "image/webp"}.get(path.suffix.lower(), "application/octet-stream")
+            return web.FileResponse(path, headers={"Cache-Control": "no-cache", "Content-Type": content_type})
         except ValueError as error:
             return web.json_response({"error": str(error)}, status=400)
         except FileNotFoundError as error:

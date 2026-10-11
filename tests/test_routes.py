@@ -219,6 +219,9 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get(f"/emotional-gallery/image/{profile['id']}/smile?thumbnail=1")
         self.assertEqual(response.status, 200)
         self.assertEqual(response.content_type, "image/webp")
+        response = await self.client.get(f"/emotional-gallery/image/{profile['id']}/smile")
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.content_type, "image/png")
         response = await self.client.get(f"/emotional-gallery/image/{profile['id']}/angry")
         self.assertEqual(response.status, 404)
 

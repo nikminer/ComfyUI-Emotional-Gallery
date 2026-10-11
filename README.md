@@ -98,7 +98,7 @@ node tests/test_locale.mjs
 node tests/test_trigger_picker.mjs
 ```
 
-Use Node.js 24 for the JavaScript checks. GitHub Actions runs these checks on each push and pull request.
+Use Node.js 24 for the JavaScript checks. Checks are run locally; no CI/CD workflow is included.
 
 ## License
 
