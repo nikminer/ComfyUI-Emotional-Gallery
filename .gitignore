@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+.venv/
+.validation/
+.env
+.env.*
+user/
+models/
+*.safetensors
+*.ckpt
+*.pt
+*.pth

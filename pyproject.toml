@@ -1,0 +1,13 @@
+[project]
+name = "comfyui-emotional-gallery"
+version = "0.7.3"
+description = "An independent character LoRA expression generator with a persistent visual gallery for ComfyUI."
+requires-python = ">=3.10"
+license = "MIT"
+
+[project.urls]
+Repository = "https://github.com/nikminer/ComfyUI-Emotional-Gallery"
+Issues = "https://github.com/nikminer/ComfyUI-Emotional-Gallery/issues"
+
+[tool.comfy]
+DisplayName = "ComfyUI Emotional Gallery"
