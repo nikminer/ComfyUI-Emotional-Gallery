@@ -3,6 +3,8 @@ import { api } from "../../scripts/api.js";
 import { mountLauncher } from "./launcher.js";
 import { registerLabels, localize, t } from "./locale.js";
 import { TriggerPicker } from "./triggers.js";
+import { initialModelFamily, modelDefaults, preferredModelFiles } from "./models.js";
+import { galleryNodeNames, hideGalleryNodeDefinitions, hideGalleryRegisteredNodes } from "./internal_nodes.js";
 
 const ROOT = "/emotional-gallery";
 const STORAGE_KEY = "emotional-gallery.settings.v2";
@@ -37,13 +39,6 @@ function button(text, className, action) {
     return node;
 }
 
-function widget(node, name, value) {
-    const target = node.widgets?.find(item => item.name === name);
-    if (!target) throw new Error(`У узла отсутствует поле ${name}`);
-    target.value = value;
-    target.callback?.(value);
-}
-
 function imageUrl(profile, emotion, thumbnail = false) {
     const path = `${ROOT}/image/${encodeURIComponent(profile.id)}/${encodeURIComponent(emotion)}?v=${profile.images[emotion]?.version ?? ""}${thumbnail ? "&thumbnail=1" : ""}`;
     return api.apiURL(path);
@@ -59,7 +54,6 @@ class EmotionGallery {
         registerLabels([...config.categories, ...config.emotions]);
         this.profile = null;
         this.selected = "neutral";
-        this.target = null;
         this.inputs = {};
         this.cards = new Map();
         this.categories = new Map();
@@ -85,20 +79,18 @@ class EmotionGallery {
         const body = element("div", "eg-body");
         const settings = element("aside", "eg-settings");
         settings.append(element("h3", "", "Персонаж и генерация"));
-        this.field(settings, "Тип модели", "model_family", "select", [
-            { value: "anima", label: "Anima" }, { value: "checkpoint", label: "SD 1.5 / SDXL" },
-        ]);
+        this.field(settings, "Model profile", "model_family", "select", Object.entries(config.model_profiles).map(([value, profile]) => ({ value, label: profile.label })));
         this.inputs.model_family.addEventListener("change", () => {
-            const defaults = this.inputs.model_family.value === "anima" ? this.config.anima_defaults : this.config.defaults;
-            for (const name of ["width", "height", "steps", "cfg", "sampler_name", "scheduler", "strength_clip"]) this.inputs[name].value = defaults[name];
+            const family = this.inputs.model_family.value;
+            const defaults = modelDefaults(this.config, family);
+            for (const name of ["width", "height", "steps", "cfg", "sampler_name", "scheduler", "strength_clip", "shift", "guidance"]) this.inputs[name].value = defaults[name];
+            for (const [name, value] of Object.entries(preferredModelFiles(this.config, family))) this.inputs[name].value = value;
             this.updateModelFields();
             this.render();
         });
-        this.field(settings, "Checkpoint", "ckpt_name", "select", config.checkpoints);
-        this.field(settings, "Anima · diffusion model", "unet_name", "select", config.diffusion_models);
-        this.field(settings, "Text encoder (Qwen3 0.6B)", "clip_name", "select", config.text_encoders);
-        this.field(settings, "VAE (Qwen Image)", "vae_name", "select", config.vaes);
+        for (const [name, field] of Object.entries(config.model_fields)) this.field(settings, field.label, name, "select", config[field.catalog]);
         this.field(settings, "Shift", "shift", "number", null, { min: 0, max: 100, step: 0.1 });
+        this.field(settings, "Guidance", "guidance", "number", null, { min: 0, max: 100, step: 0.1 });
         // Keep the native value store for settings and workflow integration.
         this.field(settings, "LoRA персонажа", "lora_name", "select", config.loras);
         this.inputs.lora_name.closest("label").hidden = true;
@@ -276,14 +268,9 @@ class EmotionGallery {
         this.dialog.addEventListener("click", event => { if (event.target === this.dialog) this.dialog.close(); });
         let restored = {};
         try { restored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch { /* Ignore obsolete local settings. */ }
-        const animaAvailable = config.diffusion_models.some(name => /anima/i.test(name));
-        this.setSettings({ ...config.defaults, ...(animaAvailable ? config.anima_defaults : {}),
-            model_family: animaAvailable ? "anima" : "checkpoint",
-            ckpt_name: config.checkpoints[0] || "",
-            unet_name: config.diffusion_models.find(name => /anima-base/i.test(name)) || config.diffusion_models.find(name => /anima/i.test(name)) || config.diffusion_models[0] || "",
-            clip_name: config.text_encoders.find(name => /qwen.*06b/i.test(name)) || config.text_encoders[0] || "",
-            vae_name: config.vaes.find(name => /qwen.*vae/i.test(name)) || config.vaes[0] || "",
-            lora_name: config.loras.find(name => animaAvailable ? /anima/i.test(name) : /illu/i.test(name)) || config.loras[0] || "", ...restored });
+        const family = restored.model_family && config.model_profiles[restored.model_family] ? restored.model_family : Object.hasOwn(restored, "ckpt_name") ? "checkpoint" : initialModelFamily(config);
+        this.setSettings({ ...modelDefaults(config, family), ...preferredModelFiles(config, family),
+            lora_name: config.loras.find(name => family === "anima" ? /anima/i.test(name) : /illu/i.test(name)) || config.loras[0] || "", ...restored, model_family: family });
         this.repairSelections();
         this.render();
         this.triggerPicker.load(this.inputs.lora_name.value, !Object.hasOwn(restored, "trigger_words"));
@@ -303,7 +290,7 @@ class EmotionGallery {
         if (input.tagName === "INPUT") input.type = type;
         if (options) this.fillOptions(input, options);
         Object.assign(input, attributes);
-        input.addEventListener("input", () => ["model_family", "ckpt_name", "unet_name", "clip_name", "vae_name", "lora_name"].includes(name) ? this.render() : this.renderNote());
+        input.addEventListener("input", () => name === "model_family" || name === "lora_name" || Object.hasOwn(this.config.model_fields, name) ? this.render() : this.renderNote());
         wrapper.append(input);
         parent.append(wrapper);
         this.inputs[name] = input;
@@ -471,7 +458,8 @@ class EmotionGallery {
     setSettings(settings) {
         if (!(settings.lora_name ?? "").toLocaleLowerCase().includes(this.loraSearch.value.trim().toLocaleLowerCase())) this.loraSearch.value = "";
         this.fillOptions(this.inputs.lora_name, this.config.loras);
-        for (const [name, input] of Object.entries(this.inputs)) input.value = settings[name] ?? this.config.defaults[name];
+        const defaults = modelDefaults(this.config, settings.model_family ?? "checkpoint");
+        for (const [name, input] of Object.entries(this.inputs)) input.value = settings[name] ?? defaults[name];
         this.inputs.model_family.value = settings.model_family ?? "checkpoint";
         this.updateModelFields();
         this.filterLoras();
@@ -503,6 +491,11 @@ class EmotionGallery {
     fillOptions(input, options) {
         const selected = input.value;
         input.replaceChildren();
+        if (Object.hasOwn(this.config.model_fields, input.name)) {
+            const empty = element("option", "", "Choose a model file…");
+            empty.value = "";
+            input.append(empty);
+        }
         for (const item of options) {
             const value = typeof item === "string" ? item : item.value;
             const option = element("option", "", typeof item === "string" ? value.split(/[\\/]/).pop() : item.label);
@@ -576,18 +569,24 @@ class EmotionGallery {
     }
 
     repairSelections() {
-        for (const [name, catalog] of Object.entries({ ckpt_name: "checkpoints", unet_name: "diffusion_models", clip_name: "text_encoders", vae_name: "vaes", lora_name: "loras" })) {
-            if (!this.config[catalog].includes(this.inputs[name].value)) this.inputs[name].value = this.config[catalog][0] || "";
-        }
+        const current = Object.fromEntries(Object.keys(this.config.model_fields).map(name => [name, this.inputs[name].value]));
+        for (const [name, value] of Object.entries(preferredModelFiles(this.config, this.inputs.model_family.value, current))) this.inputs[name].value = value;
+        if (!this.config.loras.includes(this.inputs.lora_name.value)) this.inputs.lora_name.value = this.config.loras[0] || "";
         this.filterLoras();
     }
 
     updateModelFields() {
-        const anima = this.inputs.model_family.value === "anima";
-        this.inputs.ckpt_name.closest("label").hidden = anima;
-        for (const name of ["unet_name", "clip_name", "vae_name", "shift"]) this.inputs[name].closest("label").hidden = !anima;
-        for (const name of ["width", "height"]) this.inputs[name].step = anima ? 16 : 8;
-        this.modelHint.textContent = anima ? `Доступно diffusion models: ${this.config.diffusion_models.length}. Выберите Anima и совместимую LoRA. Qwen3 0.6B и Qwen Image VAE загружаются отдельно.` : `Доступно checkpoints: ${this.config.checkpoints.length}. LoRA должна соответствовать SD 1.5 / SDXL.`;
+        const profile = this.config.model_profiles[this.inputs.model_family.value];
+        for (const [name, field] of Object.entries(this.config.model_fields)) {
+            const wrapper = this.inputs[name].closest("label");
+            wrapper.hidden = !profile.model_fields.includes(name);
+            const label = profile.labels?.[name] ?? field.label;
+            wrapper.querySelector("span").textContent = label;
+            this.inputs[name].setAttribute("aria-label", label);
+        }
+        for (const name of ["shift", "guidance"]) this.inputs[name].closest("label").hidden = !Object.hasOwn(profile.defaults, name);
+        for (const name of ["width", "height"]) this.inputs[name].step = profile.source === "checkpoint" ? 8 : 16;
+        this.modelHint.textContent = profile.hint;
     }
 
     async refreshCatalogs() {
@@ -596,7 +595,8 @@ class EmotionGallery {
             this.config = await request("/config");
             registerLabels([...this.config.categories, ...this.config.emotions]);
             this.syncEmotions(this.config.emotions);
-            for (const [name, catalog] of Object.entries({ ckpt_name: "checkpoints", unet_name: "diffusion_models", clip_name: "text_encoders", vae_name: "vaes", lora_name: "loras", sampler_name: "samplers", scheduler: "schedulers" })) this.fillOptions(this.inputs[name], this.config[catalog]);
+            for (const [name, field] of Object.entries(this.config.model_fields)) this.fillOptions(this.inputs[name], this.config[field.catalog]);
+            for (const [name, catalog] of Object.entries({ lora_name: "loras", sampler_name: "samplers", scheduler: "schedulers" })) this.fillOptions(this.inputs[name], this.config[catalog]);
             this.setSettings(settings);
             this.repairSelections();
             this.render();
@@ -606,7 +606,10 @@ class EmotionGallery {
 
     getSettings() {
         const settings = {};
+        const profile = this.config.model_profiles[this.inputs.model_family.value];
         for (const [name, input] of Object.entries(this.inputs)) {
+            if (Object.hasOwn(this.config.model_fields, name) && !profile.model_fields.includes(name)) continue;
+            if (["shift", "guidance"].includes(name) && !Object.hasOwn(profile.defaults, name)) continue;
             if (input.type === "number" && !input.checkValidity()) throw new Error(`Проверьте поле ${name}`);
             settings[name] = input.type === "number" ? Number(input.value) : input.value;
         }
@@ -617,36 +620,9 @@ class EmotionGallery {
         return settings;
     }
 
-    async open(target = null) {
-        this.target = target;
+    async open() {
         if (!this.dialog.open) this.dialog.showModal();
-        if (target?.comfyClass === "EGCharacterEmotion") {
-            this.loraSearch.value = "";
-            this.fillOptions(this.inputs.lora_name, this.config.loras);
-            for (const name of ["lora_name", "strength_model", "strength_clip", "trigger_words", "base_prompt"]) {
-                const value = target.widgets?.find(item => item.name === name)?.value;
-                if (value !== undefined) this.inputs[name].value = value;
-            }
-            this.selected = target.widgets?.find(item => item.name === "emotion")?.value ?? "neutral";
-            if (this.selected === "custom") {
-                const expression = target.widgets?.find(item => item.name === "custom_expression")?.value;
-                this.selected = this.config.emotions.find(emotion => emotion.custom && emotion.prompt === expression)?.id ?? "neutral";
-            }
-            this.revealExpression(this.selected);
-            this.filterLoras();
-            this.triggerPicker.load(this.inputs.lora_name.value, false);
-        }
-        if (target?.comfyClass === "EGLoadCachedEmotion") {
-            const profileId = target.widgets?.find(item => item.name === "profile_id")?.value;
-            this.selected = target.widgets?.find(item => item.name === "emotion")?.value ?? "neutral";
-            this.revealExpression(this.selected);
-            if (profileId) {
-                await this.openProfile(profileId, true);
-                await this.loadProfiles(false, profileId);
-                return;
-            }
-        }
-        await this.loadProfiles(!target);
+        await this.loadProfiles(true);
     }
 
     async loadProfiles(restore = false, preferredId = null) {
@@ -715,7 +691,7 @@ class EmotionGallery {
         if (profile && this.profiles.value === profile.id) {
             this.profiles.selectedOptions[0].textContent = `${Object.keys(profile.images).length}/${this.config.emotions.length} · seed ${profile.settings.seed} · ${new Date(profile.created_at * 1000).toLocaleDateString("en-US")}`;
         }
-        const required = this.inputs.model_family.value === "anima" ? ["unet_name", "clip_name", "vae_name", "lora_name"] : ["ckpt_name", "lora_name"];
+        const required = [...this.config.model_profiles[this.inputs.model_family.value].model_fields, "lora_name"];
         const missingModels = required.some(name => !this.inputs[name].value);
         this.generateButton.disabled = this.busy || missingModels;
         this.deleteButton.disabled = this.busy || !profile || !!profile.active;
@@ -877,57 +853,16 @@ class EmotionGallery {
         }
     }
 
-    settingsForSelection() {
-        if (!this.profile) throw new Error("Сначала создайте или откройте галерею");
-        return this.profile.settings;
-    }
-
-    addNode(type) {
-        const node = globalThis.LiteGraph.createNode(type);
-        if (!node) throw new Error("Узел расширения недоступен. Перезапустите ComfyUI.");
-        const canvas = app.canvas;
-        const center = canvas?.ds ? [(canvas.canvas.width / 2 / canvas.ds.scale) - canvas.ds.offset[0], (canvas.canvas.height / 2 / canvas.ds.scale) - canvas.ds.offset[1]] : [100, 100];
-        node.pos = center;
-        app.graph.add(node);
-        canvas?.selectNode(node);
-        return node;
-    }
-
-    apply() {
-        try {
-            const settings = this.settingsForSelection();
-            const existing = this.target?.comfyClass === "EGCharacterEmotion" && app.graph._nodes.includes(this.target) ? this.target : null;
-            const node = existing || this.addNode("EGCharacterEmotion");
-            for (const name of ["lora_name", "strength_model", "strength_clip", "trigger_words", "base_prompt"]) widget(node, name, settings[name]);
-            const emotion = this.config.emotions.find(item => item.id === this.selected);
-            widget(node, "emotion", emotion.custom ? "custom" : emotion.id);
-            widget(node, "custom_expression", emotion.custom ? emotion.prompt : "");
-            this.target = node;
-            app.graph.setDirtyCanvas(true, true);
-            this.info(existing ? "Выражение применено к узлу персонажа." : "Узел персонажа добавлен. Подключите MODEL, CLIP и positive_prompt к вашему workflow.");
-        } catch (error) { this.error(error); }
-    }
-
-    reference() {
-        try {
-            const node = this.target?.comfyClass === "EGLoadCachedEmotion" && app.graph._nodes.includes(this.target) ? this.target : this.addNode("EGLoadCachedEmotion");
-            widget(node, "profile_id", this.profile.id);
-            widget(node, "emotion", this.selected);
-            app.graph.setDirtyCanvas(true, true);
-            this.info("Кешированное изображение выбрано в узле Load Cached Emotion.");
-        } catch (error) { this.error(error); }
-    }
-
     async copy() {
         try { await navigator.clipboard.writeText(this.promptText.textContent); this.info("Промпт скопирован."); }
         catch { this.error(new Error("Браузер запретил буфер обмена. Выделите теги эмоции и скопируйте вручную.")); }
     }
 }
 
-async function openGallery(node = null) {
+async function openGallery() {
     try {
         if (!gallery) gallery = new EmotionGallery(await request("/config"));
-        await gallery.open(node);
+        await gallery.open();
     } catch (error) {
         if (gallery?.dialog.open) gallery.error(error);
         else app.extensionManager.toast.add({ severity: "error", summary: "ComfyUI Emotional Gallery", detail: t(error.message), life: 8000 });
@@ -937,6 +872,7 @@ async function openGallery(node = null) {
 app.registerExtension({
     name: "EmotionalGallery.Expressions",
     async setup() {
+        hideGalleryRegisteredNodes(globalThis.LiteGraph.registered_node_types);
         const stylesheet = element("link");
         stylesheet.rel = "stylesheet";
         stylesheet.href = new URL("./gallery.css", import.meta.url).href;
@@ -947,15 +883,10 @@ app.registerExtension({
         });
         mountLauncher(app.menu.element, () => openGallery());
     },
-    async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (!["EGCharacterEmotion", "EGLoadCachedEmotion"].includes(nodeData.name)) return;
-        const original = nodeType.prototype.onNodeCreated;
-        nodeType.prototype.onNodeCreated = function (...args) {
-            const result = original?.apply(this, args);
-            const open = this.addWidget("button", t("Открыть галерею эмоций"), null, () => openGallery(this));
-            open.serialize = false;
-            this.egGalleryWidget = open;
-            return result;
-        };
+    beforeRegisterVueAppNodeDefs(nodeDefs) {
+        hideGalleryNodeDefinitions(nodeDefs);
+    },
+    beforeRegisterNodeDef(nodeType, nodeData) {
+        if (galleryNodeNames.has(nodeData.name)) nodeType.skip_list = true;
     },
 });

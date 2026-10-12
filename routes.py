@@ -12,6 +12,7 @@ from server import PromptServer
 
 from . import STORE
 from .gallery import ANIMA_DEFAULTS, DEFAULTS, build_prompt, normalize_settings
+from .model_profiles import MODEL_FIELDS, MODEL_PROFILES
 from .emotions import CATEGORIES, CATEGORY_LABELS_EN, SUBCATEGORIES
 from .triggers import read_trigger_words
 
@@ -67,7 +68,7 @@ def register_routes():
 
     @routes.get("/emotional-gallery/config")
     async def config(request):
-        return web.json_response({**catalogs(), "defaults": DEFAULTS, "anima_defaults": ANIMA_DEFAULTS, "emotions": list(STORE.emotions().values()), "categories": [{"id": key, "label": label, "label_en": CATEGORY_LABELS_EN[key], "subcategories": [{"id": subkey, "label": sublabel} for subkey, sublabel in SUBCATEGORIES[key].items()]} for key, label in CATEGORIES.items()]})
+        return web.json_response({**catalogs(), "defaults": DEFAULTS, "anima_defaults": ANIMA_DEFAULTS, "model_profiles": MODEL_PROFILES, "model_fields": MODEL_FIELDS, "emotions": list(STORE.emotions().values()), "categories": [{"id": key, "label": label, "label_en": CATEGORY_LABELS_EN[key], "subcategories": [{"id": subkey, "label": sublabel} for subkey, sublabel in SUBCATEGORIES[key].items()]} for key, label in CATEGORIES.items()]})
 
     @routes.post("/emotional-gallery/emotions")
     async def add_emotion(request):
@@ -168,11 +169,16 @@ def register_routes():
                 if not isinstance(data.get("force", False), bool):
                     raise ValueError("force должен быть логическим значением")
                 lora_path = folder_paths.get_full_path_or_raise("loras", settings["lora_name"])
-                if settings.get("model_family") == "anima":
+                model_profile = MODEL_PROFILES[settings.get("model_family", "checkpoint")]
+                extra_clip_paths = tuple(folder_paths.get_full_path_or_raise("text_encoders", settings[key]) for key in ("clip_name2", "clip_name3") if key in settings)
+                if model_profile["source"] == "split":
                     manifest = STORE.ensure_profile(settings,
                         folder_paths.get_full_path_or_raise("diffusion_models", settings["unet_name"]), lora_path,
                         clip_path=folder_paths.get_full_path_or_raise("text_encoders", settings["clip_name"]),
-                        vae_path=folder_paths.get_full_path_or_raise("vae", settings["vae_name"]))
+                        vae_path=folder_paths.get_full_path_or_raise("vae", settings["vae_name"]), extra_clip_paths=extra_clip_paths)
+                elif model_profile["source"] == "sd3_checkpoint":
+                    manifest = STORE.ensure_profile(settings, folder_paths.get_full_path_or_raise("checkpoints", settings["ckpt_name"]), lora_path,
+                        clip_path=folder_paths.get_full_path_or_raise("text_encoders", settings["clip_name"]), extra_clip_paths=extra_clip_paths)
                 else:
                     manifest = STORE.ensure_profile(settings, folder_paths.get_full_path_or_raise("checkpoints", settings["ckpt_name"]), lora_path)
                 definitions = STORE.profile_emotions(manifest)

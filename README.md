@@ -2,11 +2,11 @@
 
 English | [Русский](README.ru.md)
 
-A custom ComfyUI extension for generating, caching, and browsing facial expressions for character LoRAs. Open **◉ Expressions**, choose your character and generation settings, then build a visual expression library. The interface is always in English.
+A custom ComfyUI extension for generating, caching, and browsing facial expressions for character LoRAs. Open **◉ Expressions**, choose your character and generation settings, then build a visual expression library. The interface is always in English. Users work through this window; the extension's implementation nodes are hidden from the node library, search, and Add Node menu.
 
 ## Features
 
-- Independent generator for **Anima** and **SD 1.5 / SDXL**, with model, LoRA, prompt, sampler, seed, and image-size controls.
+- Independent local generator with profiles for **Anima, Illustrious / NoobAI, Pony, SDXL, SD 1.5, Flux.1 Dev / Schnell, SD3 / SD3.5, Qwen Image, and Z-Image Base / Turbo**, with model, LoRA, prompt, sampler, seed, and image-size controls.
 - Searchable LoRA picker, including subfolders and ComfyUI extra model paths.
 - Trigger-word toggles from local LoRA metadata, with group selection and remembered choices for each LoRA.
 - **81 built-in expressions**: 49 SFW and 32 NSFW, organized into collapsible subcategories. Add your own expressions to any subcategory.
@@ -35,7 +35,7 @@ For updates, run `git pull` inside the extension directory, restart ComfyUI, and
 
 ## Usage
 
-1. Open **◉ Expressions** and choose **Anima** or **SD 1.5 / SDXL**. Anima uses a diffusion model, Qwen3 0.6B text encoder, and Qwen Image VAE; SD uses a checkpoint. The LoRA must match the model architecture.
+1. Open **◉ Expressions** and choose a **Model profile**. The window shows the files required by that architecture and applies its starting resolution, sampling settings, and CLIP strength. The LoRA must match the model architecture. Filename matches suggest model files; you can select differently named compatible files manually. Missing models remain unselected instead of falling back to an unrelated architecture.
 2. Search for a **Character LoRA**. Use **Refresh models and LoRAs** after adding model files.
 3. Select trigger words using the toggle buttons. **Group mode**, **All on / All off**, and **Reload tags** help manage metadata groups; the text field also accepts manual edits. Metadata is read locally from LoRA Manager, rgthree, Civitai sidecars, descriptions marked with trigger words, and explicit safetensors activation metadata.
 4. Set the base portrait prompt, negative prompt, LoRA strength, and generation settings. Anima defaults are 768×768, 30 steps, CFG 4, `euler_ancestral` / `simple`, shift 3, and CLIP strength 0. These are starting values you can adjust.
@@ -65,21 +65,31 @@ Stopping remaining gallery tasks removes only that set's waiting tasks. The curr
 
 **Delete set** moves the selected set into `user/emotional_gallery/.trash/`. **Restore deleted set** restores the last deleted set, including its images, unless a replacement set already occupies the same cache identity. Deletion is unavailable while that set is generating.
 
-### Launcher and workflow nodes
+### Launcher
 
 Drag the launcher's dotted handle to move it. Drop it on **Dock Expressions** in the ComfyUI toolbar to dock it, or drag it out again to float. Position is remembered in your browser. With the handle focused, Enter toggles docking, arrow keys move it by 10 pixels, Shift + arrow keys move it by 1 pixel, and Escape cancels a drag.
 
-The gallery's selection panel contains only **Copy expression**. Optional workflow nodes remain available for manual use:
+The gallery's selection panel contains only **Copy expression**. Internal generation nodes stay registered for execution and compatibility with older workflows, but are not offered for adding to a workflow. Nineteen close variants are hidden from the current built-in gallery while their legacy identifiers remain available to old workflows and direct cache reads.
 
-- **Character Emotion** applies the character LoRA and outputs the combined positive prompt. Connect matching MODEL and CLIP inputs, then connect its outputs to your sampler and text encoders. Apply the character LoRA once.
-- **Cache Emotion** saves an image to the gallery cache.
-- **Load Cached Emotion** supplies the exact cached image for img2img, IPAdapter, or other image-processing workflows.
+## Model profiles and compatibility
 
-Existing workflow node identifiers and cached expressions remain compatible. Nineteen close variants are hidden from the current built-in gallery while their legacy identifiers remain available to old workflows and direct cache reads.
+The extension runs models locally through ComfyUI's native loaders and sampling nodes. It does not use paid generation APIs or download models. Add the model files and matching LoRAs to your existing ComfyUI model directories, then use **Refresh models and LoRAs**. Additional architectures require their native nodes in your ComfyUI version.
 
-## Compatibility
+| Profile | Required model files | Starting settings |
+| --- | --- | --- |
+| Anima | Diffusion model, Qwen3 0.6B, Qwen Image VAE | 768×768, 30 steps, CFG 4 |
+| Illustrious / NoobAI, Pony, SDXL | Complete checkpoint containing text encoders and VAE | 1024×1024, 28 steps, CFG 5 (Pony: 6) |
+| SD 1.5 | Complete checkpoint | 512×512, 24 steps, CFG 7 |
+| Flux.1 Dev | Diffusion model, CLIP-L, T5-XXL, Flux.1 / ae VAE | 1024×1024, 20 steps, CFG 1, guidance 3.5 |
+| Flux.1 Schnell | Diffusion model, CLIP-L, T5-XXL, Flux.1 / ae VAE | 1024×1024, 4 steps, CFG 1 |
+| SD3 / SD3.5 | Checkpoint containing VAE, separate CLIP-L, CLIP-G, T5-XXL | 1024×1024, 28 steps, CFG 4.5 |
+| Qwen Image | Text-to-image diffusion model, Qwen2.5-VL 7B, Qwen Image VAE | 1024×1024, 30 steps, CFG 4 |
+| Z-Image Base | Diffusion model, Qwen3 4B, Flux.1 / ae VAE | 1024×1024, 25 steps, CFG 4 |
+| Z-Image Turbo | Diffusion model, Qwen3 4B, Flux.1 / ae VAE | 1024×1024, 8 steps, CFG 1 |
 
-Verified locally with ComfyUI 0.37.0 and frontend 1.52.7. Anima requires a ComfyUI version with native Anima support. Supported recipes use ComfyUI's native loaders and sampling nodes. Flux, GGUF, and other model architectures are not currently supported.
+These are editable starting values. At CFG 1, negative-prompt guidance is disabled; Flux Dev uses its separate **Guidance** field. The original **SD 1.5 / SDXL (saved settings)** profile remains available for earlier caches. Changing a profile creates a separate recipe; previous sets remain accessible. Replacing any of the selected text encoders invalidates that recipe's cache.
+
+Model-file recipes follow the official ComfyUI examples for [Flux.1](https://comfyanonymous.github.io/ComfyUI_examples/flux/), [SD3 / SD3.5](https://comfyanonymous.github.io/ComfyUI_examples/sd3/), [Qwen Image](https://docs.comfy.org/tutorials/image/qwen/qwen-image), and [Z-Image](https://docs.comfy.org/tutorials/image/z-image/z-image-turbo). The supported scope is native text-to-image model files. GGUF loaders, Flux.2, reference-image/editing variants, video generation, and external services need different recipes and are not included.
 
 Expression quality and character consistency depend on the model, matching LoRA, trigger words, and generation settings. A preview does not guarantee identical expression or composition in another workflow. Models, LoRAs, and generated images are not included in this repository.
 
@@ -94,8 +104,12 @@ node --check web/gallery.js
 node --check web/launcher.js
 node --check web/locale.js
 node --check web/triggers.js
+node --check web/models.js
+node --check web/internal_nodes.js
 node tests/test_locale.mjs
 node tests/test_trigger_picker.mjs
+node tests/test_models.mjs
+node tests/test_internal_nodes.mjs
 ```
 
 Use Node.js 24 for the JavaScript checks. Checks are run locally; no CI/CD workflow is included.

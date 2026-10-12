@@ -14,9 +14,10 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
 from .emotions import ACTIVE_EMOTION_MAP, CACHE_EMOTION_MAP, EMOTION_MAP, RETIRED_EMOTIONS, custom_definitions, expression_prompt, normalize_category, normalize_subcategory
+from .model_profiles import MODEL_FIELDS, MODEL_PROFILES
 
 DEFAULTS = {
-    "model_family": "checkpoint", "unet_name": "", "clip_name": "", "vae_name": "", "shift": 3.0,
+    "model_family": "checkpoint", "unet_name": "", "clip_name": "", "clip_name2": "", "clip_name3": "", "vae_name": "", "shift": 3.0, "guidance": 3.5,
     "ckpt_name": "", "lora_name": "", "strength_model": 0.8, "strength_clip": 0.8,
     "trigger_words": "", "base_prompt": "portrait, close-up face, looking at viewer, simple background, detailed face",
     "negative_prompt": "low quality, blurry, deformed, bad anatomy, extra limbs, text, watermark",
@@ -25,7 +26,6 @@ DEFAULTS = {
 }
 ANIMA_DEFAULTS = {"width": 768, "height": 768, "steps": 30, "cfg": 4.0,
                   "sampler_name": "euler_ancestral", "scheduler": "simple", "strength_clip": 0.0}
-ANIMA_KEYS = ("unet_name", "clip_name", "vae_name", "shift")
 PROFILE_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 
 
@@ -39,19 +39,25 @@ def model_identity(path):
 def normalize_settings(values, catalogs):
     if not isinstance(values, dict):
         raise ValueError("Настройки должны быть объектом")
-    settings = {key: values.get(key, default) for key, default in DEFAULTS.items()}
-    if settings["model_family"] not in ("checkpoint", "anima"):
-        raise ValueError("Выберите SD 1.5 / SDXL или Anima")
-    model_options = (("unet_name", "diffusion_models"), ("clip_name", "text_encoders"), ("vae_name", "vaes")) if settings["model_family"] == "anima" else (("ckpt_name", "checkpoints"),)
+    family = values.get("model_family", "checkpoint")
+    if not isinstance(family, str) or family not in MODEL_PROFILES:
+        raise ValueError("Choose a supported model profile")
+    profile = MODEL_PROFILES[family]
+    defaults = {**DEFAULTS, **profile["defaults"]}
+    settings = {key: values.get(key, default) for key, default in defaults.items()}
+    model_options = tuple((key, MODEL_FIELDS[key]["catalog"]) for key in profile["model_fields"])
     for key, catalog in (*model_options, ("lora_name", "loras"), ("sampler_name", "samplers"), ("scheduler", "schedulers")):
         if not isinstance(settings[key], str) or settings[key] not in catalogs[catalog]:
             raise ValueError(f"Выберите доступное значение: {key}")
     # Exclude hidden, unused model fields from the cache key.
-    if settings["model_family"] == "checkpoint":
-        for key in ("model_family", *ANIMA_KEYS):
+    for key in MODEL_FIELDS:
+        if key not in profile["model_fields"]:
             settings.pop(key)
-    else:
-        settings.pop("ckpt_name")
+    for key in ("shift", "guidance"):
+        if key not in profile["defaults"]:
+            settings.pop(key)
+    if family == "checkpoint":
+        settings.pop("model_family")
     for key in ("trigger_words", "base_prompt", "negative_prompt"):
         if not isinstance(settings[key], str) or len(settings[key]) > 20000:
             raise ValueError(f"Некорректный текст: {key}")
@@ -61,12 +67,13 @@ def normalize_settings(values, catalogs):
         if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
             raise ValueError(f"{key}: ожидается целое число от {minimum} до {maximum}")
     for key in ("width", "height"):
-        multiple = 16 if settings.get("model_family") == "anima" else 8
+        multiple = 8 if profile["source"] == "checkpoint" else 16
         if settings[key] % multiple:
             raise ValueError(f"{key}: размер должен быть кратен {multiple}")
     float_limits = [("cfg", 0, 100), ("strength_model", -100, 100), ("strength_clip", -100, 100)]
-    if settings.get("model_family") == "anima":
-        float_limits.append(("shift", 0, 100))
+    for key in ("shift", "guidance"):
+        if key in settings:
+            float_limits.append((key, 0, 100))
     for key, minimum, maximum in float_limits:
         value = settings[key]
         if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or not minimum <= value <= maximum:
@@ -77,6 +84,8 @@ def normalize_settings(values, catalogs):
 
 def build_prompt(settings, profile_id, emotion, definition=None):
     """One batch of one image; ComfyUI owns sampling and model memory."""
+    family = settings.get("model_family", "checkpoint")
+    profile = MODEL_PROFILES[family]
     prompt = {
         "2": {"class_type": "EGCharacterEmotion", "inputs": {
             "model": ["1", 0], "clip": ["1", 1], "lora_name": settings["lora_name"],
@@ -94,17 +103,29 @@ def build_prompt(settings, profile_id, emotion, definition=None):
         "7": {"class_type": "VAEDecode", "inputs": {"samples": ["6", 0], "vae": ["1", 2]}},
         "8": {"class_type": "EGCacheImage", "inputs": {"images": ["7", 0], "profile_id": profile_id, "emotion": emotion}},
     }
-    if settings.get("model_family") == "anima":
+    if profile["source"] == "split":
         prompt["1"] = {"class_type": "EGDiffusionLoader", "inputs": {"unet_name": settings["unet_name"], "weight_dtype": "default"}}
-        prompt["9"] = {"class_type": "EGTextEncoderLoader", "inputs": {"clip_name": settings["clip_name"], "type": "stable_diffusion"}}
+        if "clip_name2" in settings:
+            prompt["9"] = {"class_type": "EGDualTextEncoderLoader", "inputs": {"clip_name1": settings["clip_name"], "clip_name2": settings["clip_name2"], "type": profile["encoder_type"]}}
+        else:
+            prompt["9"] = {"class_type": "EGTextEncoderLoader", "inputs": {"clip_name": settings["clip_name"], "type": profile["encoder_type"]}}
         prompt["10"] = {"class_type": "EGVAELoader", "inputs": {"vae_name": settings["vae_name"]}}
-        prompt["11"] = {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["2", 0], "shift": settings["shift"]}}
         prompt["2"]["inputs"]["clip"] = ["9", 0]
         prompt["5"]["class_type"] = "EmptySD3LatentImage"
-        prompt["6"]["inputs"]["model"] = ["11", 0]
         prompt["7"]["inputs"]["vae"] = ["10", 0]
     else:
         prompt["1"] = {"class_type": "EGCheckpointLoader", "inputs": {"ckpt_name": settings["ckpt_name"]}}
+        if family == "sd3":
+            prompt["9"] = {"class_type": "EGTripleTextEncoderLoader", "inputs": {"clip_name1": settings["clip_name"], "clip_name2": settings["clip_name2"], "clip_name3": settings["clip_name3"]}}
+            prompt["2"]["inputs"]["clip"] = ["9", 0]
+            prompt["5"]["class_type"] = "EmptySD3LatentImage"
+    if "shift" in settings:
+        prompt["11"] = {"class_type": "ModelSamplingSD3" if family == "sd3" else "ModelSamplingAuraFlow", "inputs": {"model": ["2", 0], "shift": settings["shift"]}}
+        prompt["6"]["inputs"]["model"] = ["11", 0]
+    if family in ("flux", "flux_schnell"):
+        if family == "flux":
+            prompt["12"] = {"class_type": "FluxGuidance", "inputs": {"conditioning": ["3", 0], "guidance": settings["guidance"]}}
+            prompt["6"]["inputs"]["positive"] = ["12", 0]
     if emotion not in EMOTION_MAP:
         expression_prompt("", "", emotion, definition)
         prompt["2"]["inputs"]["emotion"] = "custom"
@@ -197,13 +218,19 @@ class GalleryStore:
         temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(temporary, directory / "manifest.json")
 
-    def ensure_profile(self, settings, checkpoint_path, lora_path, *, clip_path=None, vae_path=None):
+    def ensure_profile(self, settings, checkpoint_path, lora_path, *, clip_path=None, vae_path=None, extra_clip_paths=()):
         identity = {"version": 1, "settings": settings, "checkpoint": model_identity(checkpoint_path), "lora": model_identity(lora_path), "emotions": CACHE_EMOTION_MAP}
-        if settings.get("model_family") == "anima":
+        profile = MODEL_PROFILES[settings.get("model_family", "checkpoint")]
+        if profile["source"] == "split":
             identity["version"] = 2
             identity["diffusion_model"] = identity.pop("checkpoint")
             identity["text_encoder"] = model_identity(clip_path)
             identity["vae"] = model_identity(vae_path)
+        elif profile["source"] == "sd3_checkpoint":
+            identity["version"] = 2
+            identity["text_encoder"] = model_identity(clip_path)
+        if extra_clip_paths:
+            identity["extra_text_encoders"] = [model_identity(path) for path in extra_clip_paths]
         profile_id = hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:32]
         with self.lock:
             if not (self.directory(profile_id) / "manifest.json").exists():

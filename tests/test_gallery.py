@@ -76,6 +76,83 @@ class GalleryTests(unittest.TestCase):
         self.assertEqual(normalized, self.settings)
         self.assertEqual(original["id"], self.profile(normalized)["id"])
 
+    def family_settings(self, family):
+        profile = gallery.MODEL_PROFILES[family]
+        values = {**self.settings, "model_family": family, "width": 1024, "height": 1024}
+        for key in profile["model_fields"]:
+            values[key] = self.catalogs[gallery.MODEL_FIELDS[key]["catalog"]][0]
+        return gallery.normalize_settings(values, self.catalogs)
+
+    def test_all_profiles_require_only_their_model_files(self):
+        for family, profile in gallery.MODEL_PROFILES.items():
+            with self.subTest(family=family):
+                settings = self.family_settings(family)
+                self.assertEqual(set(settings) & set(gallery.MODEL_FIELDS), set(profile["model_fields"]))
+                for key in ("shift", "guidance"):
+                    self.assertEqual(key in settings, key in profile["defaults"])
+                for key in profile["model_fields"]:
+                    with self.assertRaises(ValueError):
+                        gallery.normalize_settings({**settings, key: "../missing.safetensors"}, self.catalogs)
+        for family in ("unsupported", [], None):
+            with self.assertRaises(ValueError):
+                gallery.normalize_settings({**self.settings, "model_family": family}, self.catalogs)
+
+    def test_named_checkpoint_profiles_use_native_sd_latents(self):
+        for family in ("illustrious", "pony", "sdxl", "sd15"):
+            prompt = gallery.build_prompt(self.family_settings(family), "a" * 32, "neutral")
+            self.assertEqual(prompt["1"]["class_type"], "EGCheckpointLoader")
+            self.assertEqual(prompt["5"]["class_type"], "EmptyLatentImage")
+            self.assertEqual(prompt["7"]["inputs"]["vae"], ["1", 2])
+            self.assertNotIn("9", prompt)
+
+    def test_flux_guidance_and_schnell_recipes_are_distinct(self):
+        dev = self.family_settings("flux")
+        dev["guidance"] = 4.0
+        prompt = gallery.build_prompt(dev, "a" * 32, "smile")
+        self.assertEqual(prompt["9"]["class_type"], "EGDualTextEncoderLoader")
+        self.assertEqual(prompt["9"]["inputs"]["type"], "flux")
+        self.assertEqual(prompt["5"]["class_type"], "EmptySD3LatentImage")
+        self.assertEqual(prompt["12"]["inputs"], {"conditioning": ["3", 0], "guidance": 4.0})
+        self.assertEqual(prompt["6"]["inputs"]["positive"], ["12", 0])
+        schnell = gallery.build_prompt(self.family_settings("flux_schnell"), "a" * 32, "smile")
+        self.assertNotIn("12", schnell)
+        self.assertEqual(schnell["6"]["inputs"]["positive"], ["3", 0])
+
+    def test_qwen_and_z_image_use_the_correct_encoder_and_shift(self):
+        for family, encoder in (("qwen_image", "qwen_image"), ("z_image", "lumina2"), ("z_image_turbo", "lumina2")):
+            settings = self.family_settings(family)
+            prompt = gallery.build_prompt(settings, "a" * 32, "neutral")
+            self.assertEqual(prompt["9"]["inputs"]["type"], encoder)
+            self.assertEqual(prompt["5"]["class_type"], "EmptySD3LatentImage")
+            self.assertEqual(prompt["11"]["class_type"], "ModelSamplingAuraFlow")
+            self.assertEqual(prompt["11"]["inputs"]["shift"], settings["shift"])
+
+    def test_sd3_loads_three_encoders_and_checkpoint_vae(self):
+        prompt = gallery.build_prompt(self.family_settings("sd3"), "a" * 32, "neutral")
+        self.assertEqual(prompt["1"]["class_type"], "EGCheckpointLoader")
+        self.assertEqual(prompt["9"]["class_type"], "EGTripleTextEncoderLoader")
+        self.assertEqual(set(prompt["9"]["inputs"]), {"clip_name1", "clip_name2", "clip_name3"})
+        self.assertEqual(prompt["11"]["class_type"], "ModelSamplingSD3")
+        self.assertEqual(prompt["7"]["inputs"]["vae"], ["1", 2])
+
+    def test_every_extra_encoder_participates_in_cache_identity(self):
+        second = self.root / "second.safetensors"
+        third = self.root / "third.safetensors"
+        second.write_bytes(b"second")
+        third.write_bytes(b"third")
+        for family in ("flux", "sd3"):
+            settings = self.family_settings(family)
+            extras = (second,) if family == "flux" else (second, third)
+            options = {"clip_path": self.clip, "extra_clip_paths": extras}
+            if family == "flux":
+                options["vae_path"] = self.vae
+            original = self.store.ensure_profile(settings, self.checkpoint, self.lora, **options)
+            for path in extras:
+                path.write_bytes(path.read_bytes() + b"replacement")
+                updated = self.store.ensure_profile(settings, self.checkpoint, self.lora, **options)
+                self.assertNotEqual(original["id"], updated["id"])
+                original = updated
+
     def test_recipe_stays_identical_except_expression(self):
         profile = self.profile()
         first = gallery.build_prompt(self.settings, profile["id"], "smile")

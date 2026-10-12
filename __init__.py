@@ -4,7 +4,7 @@ from .gallery import GalleryStore
 
 STORE = GalleryStore(folder_paths.get_user_directory() + "/emotional_gallery")
 
-from .nodes import EGCacheImage, EGCharacterEmotion, EGCheckpointLoader, EGLoadCachedEmotion, EGDiffusionLoader, EGTextEncoderLoader, EGVAELoader
+from .nodes import EGCacheImage, EGCharacterEmotion, EGCheckpointLoader, EGLoadCachedEmotion, EGDiffusionLoader, EGTextEncoderLoader, EGVAELoader, EGDualTextEncoderLoader, EGTripleTextEncoderLoader
 from .routes import register_routes
 
 NODE_CLASS_MAPPINGS = {
@@ -15,6 +15,8 @@ NODE_CLASS_MAPPINGS = {
     "EGDiffusionLoader": EGDiffusionLoader,
     "EGTextEncoderLoader": EGTextEncoderLoader,
     "EGVAELoader": EGVAELoader,
+    "EGDualTextEncoderLoader": EGDualTextEncoderLoader,
+    "EGTripleTextEncoderLoader": EGTripleTextEncoderLoader,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "EGCharacterEmotion": "Character Emotion · ComfyUI Emotional Gallery",

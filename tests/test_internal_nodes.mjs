@@ -1,0 +1,23 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { galleryNodeNames, hideGalleryNodeDefinitions, hideGalleryRegisteredNodes } from "../web/internal_nodes.js";
+
+const registration = readFileSync(new URL("../__init__.py", import.meta.url), "utf8").split("NODE_CLASS_MAPPINGS = {")[1].split("}")[0];
+const registered = [...registration.matchAll(/"(EG\w+)":/g)].map(match => match[1]);
+assert.deepEqual([...galleryNodeNames].sort(), registered.sort());
+const other = { name: "KSampler", category: "sampling" };
+const unrelated = { name: "EGUnrelatedPlugin", category: "Other" };
+const definitions = [other, ...registered.map(name => ({ name })), unrelated];
+hideGalleryNodeDefinitions(definitions);
+assert.deepEqual(definitions, [other, unrelated]);
+hideGalleryNodeDefinitions(definitions);
+assert.deepEqual(definitions, [other, unrelated]);
+const registry = Object.fromEntries([other, ...registered.map(name => ({ name })), unrelated].map(node => [node.name, node]));
+const existingCharacterNode = registry.EGCharacterEmotion;
+hideGalleryRegisteredNodes(registry);
+assert.deepEqual(Object.keys(registry), ["KSampler", "EGUnrelatedPlugin"]);
+assert.equal(registry.EGCharacterEmotion, existingCharacterNode);
+registry.EGCharacterEmotion = { name: "EGCharacterEmotion", refreshed: true };
+assert.equal(registry.EGCharacterEmotion.refreshed, true);
+assert.equal(Object.keys(registry).includes("EGCharacterEmotion"), false);
+console.log("Internal gallery nodes hidden; unrelated node definitions preserved.");

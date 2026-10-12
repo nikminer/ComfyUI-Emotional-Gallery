@@ -3,7 +3,8 @@ import torch
 from PIL import Image
 
 import folder_paths
-from nodes import CheckpointLoaderSimple, CLIPLoader, LoraLoader, UNETLoader, VAELoader
+from nodes import CheckpointLoaderSimple, CLIPLoader, DualCLIPLoader, LoraLoader, UNETLoader, VAELoader
+from comfy_extras.nodes_sd3 import TripleCLIPLoader
 
 from . import STORE
 from .emotions import EMOTION_MAP, expression_prompt
@@ -41,6 +42,31 @@ class EGVAELoader(VAELoader):
     @classmethod
     def IS_CHANGED(cls, vae_name, **kwargs):
         return model_identity(folder_paths.get_full_path_or_raise("vae", vae_name))
+
+
+class EGDualTextEncoderLoader(DualCLIPLoader):
+    CATEGORY = "Emotional Gallery/internal"
+
+    @classmethod
+    def IS_CHANGED(cls, clip_name1, clip_name2, **kwargs):
+        return [model_identity(folder_paths.get_full_path_or_raise("text_encoders", name)) for name in (clip_name1, clip_name2)]
+
+
+class EGTripleTextEncoderLoader:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {name: (folder_paths.get_filename_list("text_encoders"),) for name in ("clip_name1", "clip_name2", "clip_name3")}}
+
+    RETURN_TYPES = ("CLIP",)
+    CATEGORY = "Emotional Gallery/internal"
+    FUNCTION = "load_clip"
+
+    @classmethod
+    def IS_CHANGED(cls, clip_name1, clip_name2, clip_name3):
+        return [model_identity(folder_paths.get_full_path_or_raise("text_encoders", name)) for name in (clip_name1, clip_name2, clip_name3)]
+
+    def load_clip(self, clip_name1, clip_name2, clip_name3):
+        return TripleCLIPLoader.execute(clip_name1, clip_name2, clip_name3).result
 
 
 class EGCharacterEmotion(LoraLoader):

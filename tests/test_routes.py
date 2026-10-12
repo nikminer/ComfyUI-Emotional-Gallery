@@ -102,6 +102,20 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(identity["text_encoder"]["path"], str(self.fixture.clip.resolve()))
         self.assertEqual(identity["vae"]["path"], str(self.fixture.vae.resolve()))
 
+    async def test_new_profiles_queue_and_cache_their_actual_recipe(self):
+        for family in ("illustrious", "pony", "sdxl", "sd15", "flux", "flux_schnell", "sd3", "qwen_image", "z_image", "z_image_turbo"):
+            with self.subTest(family=family):
+                settings = self.fixture.family_settings(family)
+                response = await self.client.post("/emotional-gallery/generate", json={"settings": settings, "emotions": ["neutral"]})
+                data = await response.json()
+                self.assertEqual(response.status, 200, data)
+                self.assertEqual(data["queued"], 1)
+                self.assertEqual(data["profile"]["settings"]["model_family"], family)
+                identity = self.store.read(data["profile"]["id"])["identity"]
+                if "clip_name2" in settings:
+                    self.assertEqual(len(identity["extra_text_encoders"]), 2 if family == "sd3" else 1)
+                self.queue.pending.clear()
+
     async def test_jobs_use_requesting_window_for_execution_lifecycle(self):
         response, data = await self.generate(emotions=["smile", "angry"], client_id="gallery-window")
         self.assertEqual(response.status, 200)
