@@ -6,7 +6,7 @@ English | [Русский](README.ru.md)
 
 A custom ComfyUI extension for generating, caching, and browsing facial expressions for character LoRAs. Open **◉ Expressions**, choose your character and generation settings, then build a visual expression library. The interface is always in English. Users work through this window; the extension's implementation nodes are hidden from the node library, search, and Add Node menu.
 
-![ComfyUI Emotional Gallery with grouped expressions and collapsible settings](https://raw.githubusercontent.com/nikminer/ComfyUI-Emotional-Gallery/main/docs/images/gallery.png)
+![ComfyUI Emotional Gallery with grouped expressions and collapsible settings](https://raw.githubusercontent.com/nikminer/ComfyUI-Emotional-Gallery/main/docs/images/gallery.png?v=2)
 
 ## Features
 
@@ -17,7 +17,7 @@ A custom ComfyUI extension for generating, caching, and browsing facial expressi
 - Persistent image sets for each character and generation recipe. Generate only missing previews, delete unwanted sets, and restore the last deleted set.
 - Fixed **Expand all / Collapse all** controls above the scrolling list, with remembered scroll positions when switching tabs.
 - Select a preview and use **Copy expression** to copy only its expression tags.
-- Click a card to select its expression. Use **Enlarge** or the selected thumbnail to view the full image. Browse cached expressions in the current tab with the arrow buttons or Left / Right keys; close with Escape.
+- Click a card to select its expression. Double-click a cached card, or use **Enlarge** or the selected thumbnail, to view the full image. Browse cached expressions in the current tab with the arrow buttons or Left / Right keys; close with Escape.
 - Collapsible setup sections remember their state. **Settings** hides the sidebar, and **•••** contains custom-expression and saved-set actions.
 - A draggable launcher that can float or dock in the ComfyUI toolbar.
 
@@ -46,7 +46,7 @@ For updates, run `git pull` inside the extension directory, restart ComfyUI, and
 3. Select trigger words using the toggle buttons. **Group mode**, **All on / All off**, and **Reload tags** help manage metadata groups; the text field also accepts manual edits. Metadata is read locally from LoRA Manager, rgthree, Civitai sidecars, descriptions marked with trigger words, and explicit safetensors activation metadata.
 4. Set the base portrait prompt, negative prompt, LoRA strength, and generation settings. Anima defaults are 768×768, 30 steps, CFG 4, `euler_ancestral` / `simple`, shift 3, and CLIP strength 0. These are starting values you can adjust.
 5. Click **Create gallery**. Each expression is submitted to the regular ComfyUI queue. A shared seed makes comparison easier.
-6. Click a card to select its expression. **Copy expression** copies only expression tags; generation still uses your character trigger words and base prompt. To open the full image, use **Enlarge** or the selected thumbnail below the cards. Browse with Left / Right and close with Escape.
+6. Click a card to select its expression. **Copy expression** copies only expression tags; generation still uses your character trigger words and base prompt. To open the full image, double-click a cached card, or use **Enlarge** or the selected thumbnail below the cards. Browse with Left / Right and close with Escape.
 
 The sidebar has five collapsible sections: **Character**, **Model files**, **Trigger words**, **Prompts**, and **Generation**. Only Character starts expanded; missing model files open their section automatically. Section states and sidebar visibility are remembered in this browser. Use **Settings** to give the gallery the full window width. **•••** opens custom-expression, delete-set, and restore-set actions.
 

@@ -522,6 +522,7 @@ class EmotionGallery {
                 continue;
             }
             const card = button("", "eg-card", () => this.select(emotion.id));
+            card.addEventListener("dblclick", () => this.openPreview(emotion.id));
             card.setAttribute("aria-label", caption);
             card.classList.toggle("eg-card-custom", !!emotion.custom);
             const media = element("div", "eg-media");

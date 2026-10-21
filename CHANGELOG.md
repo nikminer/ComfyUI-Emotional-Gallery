@@ -2,13 +2,17 @@
 
 ## [Unreleased]
 
+### Features
+
+- Double-click a cached gallery card to open the full-image viewer; single-click still selects its expression.
+
 ### Fixes
 
 - Clicking a gallery card selects its expression without opening the full-image viewer. Enlarge and the selected thumbnail still open the viewer.
 
 ### Documentation
 
-- Add a gallery screenshot to the English and Russian README.
+- Update the gallery screenshot in the English and Russian README.
 
 ## [1.0.0] - 2026-10-21
 
