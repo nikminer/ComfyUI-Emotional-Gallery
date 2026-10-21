@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixes
+
+- Clicking a gallery card selects its expression without opening the full-image viewer. Enlarge and the selected thumbnail still open the viewer.
+
+### Documentation
+
+- Add a gallery screenshot to the English and Russian README.
+
 ## [1.0.0] - 2026-10-21
 
 First stable release of ComfyUI Emotional Gallery: a local character-expression generator with a persistent image library.

@@ -1,5 +1,6 @@
 # Development files are not needed in the Comfy Registry package.
 .github/
+docs/
 tests/
 scripts/
 .gitignore

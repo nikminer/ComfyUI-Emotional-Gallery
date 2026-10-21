@@ -123,7 +123,6 @@
 .eg-card{display:flex;flex-direction:column;align-items:stretch;min-width:0;border:1px solid #363947;border-radius:10px;padding:5px;background:#21242d;color:#ebedf5;text-align:left;overflow:hidden}
 .eg-card:hover{border-color:#837194;background:#2c2837}
 .eg-card.eg-active{border-color:#c5a9f5;background:#30293f;box-shadow:0 0 0 1px #b595e2}
-.eg-card-ready{cursor:zoom-in!important}
 .eg-media{width:100%;aspect-ratio:1;flex-shrink:0;background:linear-gradient(140deg,#282934,#1b1e26);border-radius:6px;overflow:hidden;display:grid;place-items:center}
 .eg-media img{width:100%;height:100%;object-fit:cover}
 .eg-placeholder{font-size:30px;color:#565266;font-weight:300}
