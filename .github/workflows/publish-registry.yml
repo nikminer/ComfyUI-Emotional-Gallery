@@ -1,0 +1,87 @@
+name: Publish to Comfy Registry
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: comfy-registry-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the released commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+
+      - name: Validate release metadata
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          metadata = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          version = metadata["project"]["version"]
+          if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", version):
+              raise SystemExit("Registry releases require a stable X.Y.Z version in pyproject.toml")
+          if os.environ["RELEASE_TAG"] != f"v{version}":
+              raise SystemExit(f"Release tag must be v{version} to match pyproject.toml")
+          publisher = metadata.get("tool", {}).get("comfy", {}).get("PublisherId", "")
+          if not publisher.strip() or publisher.startswith("@"):
+              raise SystemExit("Set tool.comfy.PublisherId to the Registry publisher ID without @")
+          print(f"Validated version {version}, publisher {publisher}")
+          PY
+
+      - name: Check Registry credentials
+        env:
+          REGISTRY_ACCESS_TOKEN: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
+        run: |
+          if [[ -z "$REGISTRY_ACCESS_TOKEN" ]]; then
+            echo "::error::Add REGISTRY_ACCESS_TOKEN in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - name: Install test dependencies
+        run: python -m pip install pillow aiohttp
+
+      - name: Test backend
+        run: python -m unittest discover -s tests -v
+
+      - name: Check frontend syntax and tests
+        run: |
+          for file in web/*.js; do
+            node --check "$file"
+          done
+          node --test tests/*.mjs
+
+      - name: Build and validate release archive
+        run: python scripts/build_release.py
+
+      - name: Publish to Comfy Registry
+        uses: Comfy-Org/publish-node-action@d2366e7abb6ab16f3bb03e3520ae25c8cf749bc9
+        with:
+          skip_checkout: 'true'
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}

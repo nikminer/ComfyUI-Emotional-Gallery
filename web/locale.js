@@ -23,7 +23,7 @@ const translations = new Map(Object.entries({
     "Догенерировать набор": "Generate missing in set", "Ничего не найдено. Измените запрос.": "No matches. Try another search.",
     "Пока нет сохранённых галерей": "No saved galleries yet",
     "Своя эмоция сохранена. Нажмите «Сгенерировать эмоцию» для её превью или догенерируйте весь набор.": "Custom expression saved. Generate its preview or generate missing expressions in the set.",
-    "Настройки изменены. Кнопка генерации создаст соответствующий набор; ниже показан сохранённый кеш.": "Settings changed. Generation will use the new settings; the saved cache is shown below.",
+    "Настройки изменены. Кнопка генерации создаст соответствующий набор; ниже показан сохранённый кеш.": "Settings changed. Create gallery uses these settings; Generate missing in group uses the saved set.",
     "Выберите модель и LoRA. Для Anima также нужны text encoder и VAE; список можно обновить.": "Choose a model and LoRA. Anima also needs a text encoder and VAE; refresh the list if needed.",
     "Кеш сохранён. Выберите выражение и примените его к workflow.": "Cache saved. Choose an expression and apply it to your workflow.",
     "Выберите LoRA, укажите trigger words и создайте галерею.": "Choose a LoRA, enter trigger words and create a gallery.",

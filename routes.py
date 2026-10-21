@@ -165,22 +165,25 @@ def register_routes():
                     client_id = str(uuid.uuid4())
                 if not isinstance(client_id, str) or not client_id.strip() or len(client_id) > 200:
                     raise ValueError("Некорректный идентификатор окна ComfyUI")
-                settings = normalize_settings(data.get("settings"), catalogs())
+                profile_id = data.get("profile_id")
+                manifest = STORE.read(profile_id) if profile_id is not None else None
+                settings = normalize_settings(manifest["settings"] if manifest is not None else data.get("settings"), catalogs())
                 if not isinstance(data.get("force", False), bool):
                     raise ValueError("force должен быть логическим значением")
-                lora_path = folder_paths.get_full_path_or_raise("loras", settings["lora_name"])
-                model_profile = MODEL_PROFILES[settings.get("model_family", "checkpoint")]
-                extra_clip_paths = tuple(folder_paths.get_full_path_or_raise("text_encoders", settings[key]) for key in ("clip_name2", "clip_name3") if key in settings)
-                if model_profile["source"] == "split":
-                    manifest = STORE.ensure_profile(settings,
-                        folder_paths.get_full_path_or_raise("diffusion_models", settings["unet_name"]), lora_path,
-                        clip_path=folder_paths.get_full_path_or_raise("text_encoders", settings["clip_name"]),
-                        vae_path=folder_paths.get_full_path_or_raise("vae", settings["vae_name"]), extra_clip_paths=extra_clip_paths)
-                elif model_profile["source"] == "sd3_checkpoint":
-                    manifest = STORE.ensure_profile(settings, folder_paths.get_full_path_or_raise("checkpoints", settings["ckpt_name"]), lora_path,
-                        clip_path=folder_paths.get_full_path_or_raise("text_encoders", settings["clip_name"]), extra_clip_paths=extra_clip_paths)
-                else:
-                    manifest = STORE.ensure_profile(settings, folder_paths.get_full_path_or_raise("checkpoints", settings["ckpt_name"]), lora_path)
+                if manifest is None:
+                    lora_path = folder_paths.get_full_path_or_raise("loras", settings["lora_name"])
+                    model_profile = MODEL_PROFILES[settings.get("model_family", "checkpoint")]
+                    extra_clip_paths = tuple(folder_paths.get_full_path_or_raise("text_encoders", settings[key]) for key in ("clip_name2", "clip_name3") if key in settings)
+                    if model_profile["source"] == "split":
+                        manifest = STORE.ensure_profile(settings,
+                            folder_paths.get_full_path_or_raise("diffusion_models", settings["unet_name"]), lora_path,
+                            clip_path=folder_paths.get_full_path_or_raise("text_encoders", settings["clip_name"]),
+                            vae_path=folder_paths.get_full_path_or_raise("vae", settings["vae_name"]), extra_clip_paths=extra_clip_paths)
+                    elif model_profile["source"] == "sd3_checkpoint":
+                        manifest = STORE.ensure_profile(settings, folder_paths.get_full_path_or_raise("checkpoints", settings["ckpt_name"]), lora_path,
+                            clip_path=folder_paths.get_full_path_or_raise("text_encoders", settings["clip_name"]), extra_clip_paths=extra_clip_paths)
+                    else:
+                        manifest = STORE.ensure_profile(settings, folder_paths.get_full_path_or_raise("checkpoints", settings["ckpt_name"]), lora_path)
                 definitions = STORE.profile_emotions(manifest)
                 current = profile_state(manifest)
                 selected = data.get("emotions", [item["id"] for item in current["emotions"]])
@@ -214,6 +217,8 @@ def register_routes():
                 return web.json_response({"profile": profile_state(STORE.read(manifest["id"])), "queued": len(prepared)})
             except (ValueError, TypeError) as error:
                 return web.json_response({"error": str(error)}, status=400)
+            except FileNotFoundError as error:
+                return web.json_response({"error": str(error)}, status=404)
             except OSError as error:
                 LOGGER.exception("Emotional Gallery cache or model file error")
                 return web.json_response({"error": f"Не удалось прочитать модель или записать кеш: {error}"}, status=500)

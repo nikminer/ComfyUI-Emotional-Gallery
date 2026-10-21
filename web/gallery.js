@@ -11,6 +11,7 @@ const STORAGE_KEY = "emotional-gallery.settings.v2";
 const GROUP_KEY = "emotional-gallery.group.v1";
 const SUBGROUP_KEY = "emotional-gallery.subgroups.v1";
 const DELETED_KEY = "emotional-gallery.deleted.v1";
+const LAYOUT_KEY = "emotional-gallery.layout.v1";
 let gallery;
 
 async function request(path, body) {
@@ -59,6 +60,15 @@ class EmotionGallery {
         this.categories = new Map();
         this.groupScroll = new Map();
         this.subgroupState = {};
+        this.layout = { settingsHidden: false, sections: {} };
+        this.settingsSections = new Map();
+        try {
+            const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "null");
+            if (saved && typeof saved === "object") {
+                this.layout.settingsHidden = saved.settingsHidden === true;
+                if (saved.sections && typeof saved.sections === "object") this.layout.sections = saved.sections;
+            }
+        } catch { /* Use the initial layout. */ }
         try { const saved = JSON.parse(localStorage.getItem(SUBGROUP_KEY) || "{}"); if (saved && typeof saved === "object" && !Array.isArray(saved)) this.subgroupState = saved; } catch { /* Use initial groups. */ }
         this.selectedGroup = "sfw";
         this.deleted = null;
@@ -74,12 +84,22 @@ class EmotionGallery {
         const heading = element("div");
         heading.append(element("div", "eg-eyebrow", "COMFYUI EMOTIONAL GALLERY"), element("h2", "", "Выражения персонажа"));
         this.counter = element("span", "eg-counter", `0 / ${config.emotions.length}`);
-        header.append(heading, this.counter, button("×", "eg-close", () => this.dialog.close()));
+        this.settingsToggle = button("Settings", "eg-secondary eg-settings-toggle", () => this.setSettingsVisible(this.settingsPanel.hidden));
+        this.settingsToggle.setAttribute("aria-controls", "eg-settings");
+        header.append(this.settingsToggle, heading, this.counter, button("×", "eg-close", () => this.dialog.close()));
         header.lastChild.setAttribute("aria-label", "Закрыть галерею");
         const body = element("div", "eg-body");
         const settings = element("aside", "eg-settings");
-        settings.append(element("h3", "", "Персонаж и генерация"));
-        this.field(settings, "Model profile", "model_family", "select", Object.entries(config.model_profiles).map(([value, profile]) => ({ value, label: profile.label })));
+        this.settingsPanel = settings;
+        settings.id = "eg-settings";
+        settings.append(element("h3", "", "Setup"));
+        const characterSettings = this.settingsSection(settings, "character", "Character", true);
+        const modelSettings = this.settingsSection(settings, "model", "Model files");
+        const triggerSettings = this.settingsSection(settings, "triggers", "Trigger words");
+        const promptSettings = this.settingsSection(settings, "prompts", "Prompts");
+        const generationSettings = this.settingsSection(settings, "generation", "Generation");
+        this.setSettingsVisible(!this.layout.settingsHidden);
+        this.field(modelSettings, "Model profile", "model_family", "select", Object.entries(config.model_profiles).map(([value, profile]) => ({ value, label: profile.label })));
         this.inputs.model_family.addEventListener("change", () => {
             const family = this.inputs.model_family.value;
             const defaults = modelDefaults(this.config, family);
@@ -88,11 +108,11 @@ class EmotionGallery {
             this.updateModelFields();
             this.render();
         });
-        for (const [name, field] of Object.entries(config.model_fields)) this.field(settings, field.label, name, "select", config[field.catalog]);
-        this.field(settings, "Shift", "shift", "number", null, { min: 0, max: 100, step: 0.1 });
-        this.field(settings, "Guidance", "guidance", "number", null, { min: 0, max: 100, step: 0.1 });
+        for (const [name, field] of Object.entries(config.model_fields)) this.field(modelSettings, field.label, name, "select", config[field.catalog]);
+        this.field(modelSettings, "Shift", "shift", "number", null, { min: 0, max: 100, step: 0.1 });
+        this.field(modelSettings, "Guidance", "guidance", "number", null, { min: 0, max: 100, step: 0.1 });
         // Keep the native value store for settings and workflow integration.
-        this.field(settings, "LoRA персонажа", "lora_name", "select", config.loras);
+        this.field(characterSettings, "LoRA персонажа", "lora_name", "select", config.loras);
         this.inputs.lora_name.closest("label").hidden = true;
         this.loraPicker = element("div", "eg-field eg-lora-picker");
         this.loraPicker.append(element("span", "", "LoRA персонажа"));
@@ -137,11 +157,12 @@ class EmotionGallery {
         this.loraButton.addEventListener("keydown", event => {
             if (event.key === "ArrowDown") { event.preventDefault(); this.toggleLoraPicker(true); }
         });
-        settings.append(this.loraPicker);
+        characterSettings.append(this.loraPicker);
         this.loraCount = element("p", "eg-hint");
-        settings.append(this.loraCount, button("Обновить список моделей и LoRA", "eg-text-button", () => this.refreshCatalogs()));
+        characterSettings.append(this.loraCount);
+        modelSettings.append(button("Обновить список моделей и LoRA", "eg-text-button", () => this.refreshCatalogs()));
         this.modelHint = element("p", "eg-hint eg-model-hint");
-        settings.append(this.modelHint);
+        modelSettings.append(this.modelHint);
         const changeLora = () => {
             this.inputs.lora_name.title = this.inputs.lora_name.value;
             if (this.inputs.lora_name.value === this.loadedLora) return;
@@ -153,27 +174,27 @@ class EmotionGallery {
             this.loadProfiles(true).catch(error => this.error(error));
         };
         this.inputs.lora_name.addEventListener("change", changeLora);
-        this.field(settings, "Trigger words", "trigger_words", "textarea");
+        this.field(triggerSettings, "Trigger words", "trigger_words", "textarea");
         this.triggerPicker = new TriggerPicker(this.inputs.trigger_words,
             name => request(`/triggers?lora_name=${encodeURIComponent(name)}`), () => this.renderNote());
         const strengths = element("div", "eg-pair");
         this.field(strengths, "Сила MODEL", "strength_model", "number", null, { min: -100, max: 100, step: 0.05 });
         this.field(strengths, "Сила CLIP", "strength_clip", "number", null, { min: -100, max: 100, step: 0.05 });
-        settings.append(strengths);
-        this.field(settings, "Базовый промпт", "base_prompt", "textarea");
-        this.field(settings, "Негативный промпт", "negative_prompt", "textarea");
+        characterSettings.append(strengths);
+        this.field(promptSettings, "Базовый промпт", "base_prompt", "textarea");
+        this.field(promptSettings, "Негативный промпт", "negative_prompt", "textarea");
         const sizes = element("div", "eg-pair");
         this.field(sizes, "Ширина", "width", "number", null, { min: 64, max: 16384, step: 8 });
         this.field(sizes, "Высота", "height", "number", null, { min: 64, max: 16384, step: 8 });
-        settings.append(sizes);
+        generationSettings.append(sizes);
         const sampling = element("div", "eg-pair");
         this.field(sampling, "Шаги", "steps", "number", null, { min: 1, max: 10000, step: 1 });
         this.field(sampling, "CFG", "cfg", "number", null, { min: 0, max: 100, step: 0.5 });
-        settings.append(sampling);
-        this.field(settings, "Sampler", "sampler_name", "select", config.samplers);
-        this.field(settings, "Scheduler", "scheduler", "select", config.schedulers);
+        generationSettings.append(sampling);
+        this.field(generationSettings, "Sampler", "sampler_name", "select", config.samplers);
+        this.field(generationSettings, "Scheduler", "scheduler", "select", config.schedulers);
         // Decimal seed text avoids silently rounding ComfyUI's 64-bit seeds.
-        this.field(settings, "Seed (одинаковый для всех эмоций)", "seed", "text");
+        this.field(generationSettings, "Seed (одинаковый для всех эмоций)", "seed", "text");
         this.inputs.seed.inputMode = "numeric";
         const content = element("section", "eg-content");
         const toolbar = element("div", "eg-toolbar");
@@ -181,14 +202,19 @@ class EmotionGallery {
         this.profiles.setAttribute("aria-label", "Сохранённые галереи этой LoRA");
         this.profiles.addEventListener("change", () => this.openProfile(this.profiles.value, true).catch(error => this.error(error)));
         this.generateButton = button("Создать галерею", "eg-primary", () => this.generate());
-        this.deleteButton = button("Удалить набор", "eg-danger", () => this.deleteProfile());
+        this.deleteButton = button("Удалить набор", "eg-danger", () => { this.setMenu.open = false; this.deleteProfile(); });
         this.deleteButton.title = "Убрать выбранный набор из списка; его можно восстановить";
-        toolbar.append(this.profiles, this.generateButton, this.deleteButton);
+        this.setMenu = element("details", "eg-set-menu");
+        const menuSummary = element("summary", "", "•••");
+        menuSummary.setAttribute("aria-label", "Gallery actions");
+        menuSummary.title = "Gallery actions";
+        const menuPanel = element("div", "eg-set-menu-panel");
+        this.setMenu.append(menuSummary, menuPanel);
+        toolbar.append(this.profiles, this.generateButton, this.setMenu);
         this.note = element("p", "eg-note");
-        const emotionToolbar = element("div", "eg-emotion-toolbar");
-        this.emotionSummary = element("span");
-        this.addEmotionButton = button("+ Своя эмоция", "eg-secondary", () => this.showEmotionEditor());
-        emotionToolbar.append(this.emotionSummary, this.addEmotionButton);
+        this.emotionSummary = element("span", "eg-library-summary");
+        this.addEmotionButton = button("+ Своя эмоция", "eg-secondary", () => { this.setMenu.open = false; this.showEmotionEditor(); });
+        menuPanel.append(this.emotionSummary, this.addEmotionButton, this.deleteButton);
         this.emotionEditor = element("form", "eg-emotion-editor");
         this.emotionEditor.hidden = true;
         this.emotionEditor.setAttribute("aria-label", "Добавить свою эмоцию");
@@ -225,7 +251,7 @@ class EmotionGallery {
         const editorActions = element("div", "eg-actions");
         this.saveEmotionButton = element("button", "eg-primary", "Добавить эмоцию");
         this.saveEmotionButton.type = "submit";
-        editorActions.append(this.saveEmotionButton, button("Отмена", "eg-text-button", () => { this.hideEmotionEditor(); this.addEmotionButton.focus(); }));
+        editorActions.append(this.saveEmotionButton, button("Отмена", "eg-text-button", () => { this.hideEmotionEditor(); this.setMenu.querySelector("summary").focus(); }));
         this.emotionError = element("p", "eg-editor-error");
         this.emotionError.setAttribute("role", "alert");
         this.emotionEditor.append(labelField, promptField, categoryField, subcategoryField, element("p", "eg-hint", "Опишите выражение лица, желательно на английском. Оно добавится к промпту персонажа и сохранится для всех LoRA."), editorActions, this.emotionError);
@@ -243,28 +269,38 @@ class EmotionGallery {
         this.preview = element("img", "eg-preview");
         this.preview.alt = "Выбранное выражение лица";
         this.preview.hidden = true;
+        this.previewButton = button("", "eg-preview-button", () => this.openPreview());
+        this.previewButton.setAttribute("aria-label", "Enlarge expression");
+        this.previewButton.title = "Enlarge expression";
+        this.previewButton.append(this.preview);
         const details = element("div", "eg-selected-details");
         this.selectionTitle = element("strong", "", "Нейтральное");
         this.promptText = element("p", "eg-expression");
         const actions = element("div", "eg-actions");
         this.copyButton = button("Копировать эмоцию", "eg-secondary", () => this.copy());
-        actions.append(this.copyButton);
+        this.enlargeButton = button("Enlarge", "eg-secondary", () => this.openPreview());
+        actions.append(this.copyButton, this.enlargeButton);
         details.append(this.selectionTitle, this.promptText, actions);
-        selected.append(this.preview, details);
+        selected.append(this.previewButton, details);
         this.message = element("div", "eg-message");
         this.message.setAttribute("role", "status");
         this.message.setAttribute("aria-live", "polite");
         this.cancelButton = button("Остановить оставшиеся", "eg-text-button", () => this.cancel());
         this.cancelButton.hidden = true;
         const footer = element("div", "eg-footer");
-        this.restoreButton = button("Восстановить удалённый набор", "eg-text-button", () => this.restoreProfile());
-        footer.append(this.message, this.cancelButton, this.restoreButton);
-        content.append(toolbar, this.note, emotionToolbar, this.emotionEditor, this.groupTabs, this.groupControls, this.grid, selected, footer);
+        this.restoreButton = button("Восстановить удалённый набор", "eg-text-button", () => { this.setMenu.open = false; this.restoreProfile(); });
+        menuPanel.append(this.restoreButton);
+        footer.append(this.message, this.cancelButton);
+        content.append(toolbar, this.note, this.emotionEditor, this.groupTabs, this.groupControls, this.grid, selected, footer);
         body.append(settings, content);
         this.dialog.append(header, body);
         document.body.append(this.dialog);
-        this.dialog.addEventListener("close", () => { this.closeLoraPicker(); clearTimeout(this.timer); this.timer = null; this.loadVersion++; });
-        this.dialog.addEventListener("pointerdown", event => { if (!this.loraPicker.contains(event.target)) this.closeLoraPicker(); });
+        this.createViewer();
+        this.dialog.addEventListener("close", () => { if (this.viewer.open) this.viewer.close(); this.setMenu.open = false; this.closeLoraPicker(); clearTimeout(this.timer); this.timer = null; this.loadVersion++; });
+        this.dialog.addEventListener("pointerdown", event => {
+            if (!this.loraPicker.contains(event.target)) this.closeLoraPicker();
+            if (!this.setMenu.contains(event.target)) this.setMenu.open = false;
+        });
         this.dialog.addEventListener("click", event => { if (event.target === this.dialog) this.dialog.close(); });
         let restored = {};
         try { restored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch { /* Ignore obsolete local settings. */ }
@@ -272,8 +308,127 @@ class EmotionGallery {
         this.setSettings({ ...modelDefaults(config, family), ...preferredModelFiles(config, family),
             lora_name: config.loras.find(name => family === "anima" ? /anima/i.test(name) : /illu/i.test(name)) || config.loras[0] || "", ...restored, model_family: family });
         this.repairSelections();
+        if (this.config.model_profiles[this.inputs.model_family.value].model_fields.some(name => !this.inputs[name].value)) {
+            this.settingsSections.get("model").details.open = true;
+            this.setSettingsVisible(true);
+        }
         this.render();
         this.triggerPicker.load(this.inputs.lora_name.value, !Object.hasOwn(restored, "trigger_words"));
+    }
+
+    saveLayout() {
+        try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(this.layout)); } catch { /* Layout remains usable. */ }
+    }
+
+    setSettingsVisible(visible) {
+        this.settingsPanel.hidden = !visible;
+        this.dialog.classList.toggle("eg-settings-hidden", !visible);
+        this.settingsToggle.setAttribute("aria-expanded", String(visible));
+        this.layout.settingsHidden = !visible;
+        this.saveLayout();
+    }
+
+    settingsSection(parent, id, title, open = false) {
+        const details = element("details", "eg-settings-section");
+        details.open = typeof this.layout.sections[id] === "boolean" ? this.layout.sections[id] : open;
+        const summary = element("summary");
+        const value = element("span", "eg-settings-value");
+        summary.append(element("span", "eg-settings-title", title), value);
+        const content = element("div", "eg-settings-section-body");
+        details.append(summary, content);
+        details.addEventListener("toggle", () => { this.layout.sections[id] = details.open; this.saveLayout(); });
+        this.settingsSections.set(id, { details, value });
+        parent.append(details);
+        return content;
+    }
+
+    renderSettingsSummary() {
+        const values = Object.fromEntries(Object.entries(this.inputs).map(([name, input]) => [name, input.value]));
+        const summary = {
+            character: values.lora_name.split(/[\\/]/).pop() || "Choose a LoRA",
+            model: this.config.model_profiles[values.model_family].label,
+            triggers: values.trigger_words.trim() ? `${values.trigger_words.split(",").filter(tag => tag.trim()).length} tags selected` : "No tags selected",
+            prompts: values.base_prompt || "Portrait description",
+            generation: `${values.width} × ${values.height} · ${values.steps} steps`,
+        };
+        for (const [id, section] of this.settingsSections) {
+            section.value.textContent = summary[id];
+            section.value.title = summary[id];
+        }
+    }
+
+    createViewer() {
+        this.viewer = element("dialog", "eg-window eg-image-viewer");
+        this.viewer.setAttribute("aria-labelledby", "eg-viewer-title");
+        const header = element("header", "eg-viewer-header");
+        this.viewerTitle = element("strong");
+        this.viewerTitle.id = "eg-viewer-title";
+        this.viewerCount = element("span", "eg-counter");
+        this.viewerCount.setAttribute("aria-live", "polite");
+        const close = button("×", "eg-close", () => this.viewer.close());
+        close.setAttribute("aria-label", "Close enlarged preview");
+        close.autofocus = true;
+        header.append(this.viewerTitle, this.viewerCount, button("Copy expression", "eg-secondary", () => this.copy()), close);
+        const body = element("div", "eg-viewer-body");
+        this.viewerPrevious = button("‹", "eg-viewer-nav", () => this.movePreview(-1));
+        this.viewerPrevious.setAttribute("aria-label", "Previous expression");
+        this.viewerNext = button("›", "eg-viewer-nav", () => this.movePreview(1));
+        this.viewerNext.setAttribute("aria-label", "Next expression");
+        const stage = element("div", "eg-viewer-stage");
+        this.viewerImage = element("img");
+        stage.append(this.viewerImage);
+        body.append(this.viewerPrevious, stage, this.viewerNext);
+        this.viewerPrompt = element("p", "eg-viewer-prompt");
+        const hint = element("p", "eg-viewer-hint", "← / → Browse expressions · Esc Close");
+        this.viewer.append(header, body, this.viewerPrompt, hint);
+        this.viewer.addEventListener("keydown", event => {
+            if (event.key === "Escape") event.stopPropagation();
+            if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            this.movePreview(event.key === "ArrowLeft" ? -1 : 1);
+        });
+        this.viewer.addEventListener("cancel", event => event.stopPropagation());
+        this.viewer.addEventListener("click", event => { if (event.target === this.viewer) this.viewer.close(); });
+        this.viewer.addEventListener("close", () => {
+            if (!this.dialog.open) return;
+            this.revealExpression(this.selected);
+            this.cards.get(this.selected)?.card.focus({ preventScroll: true });
+            this.cards.get(this.selected)?.card.scrollIntoView({ block: "nearest" });
+        });
+        this.dialog.append(this.viewer);
+    }
+
+    previewEmotions() {
+        return this.config.emotions.filter(emotion => (emotion.category ?? "sfw") === this.selectedGroup && this.profile?.images[emotion.id]);
+    }
+
+    openPreview(emotion = this.selected) {
+        this.select(emotion);
+        if (!this.profile?.images[emotion]) return;
+        this.renderPreview();
+        if (!this.viewer.open) this.viewer.showModal();
+    }
+
+    renderPreview() {
+        const emotions = this.previewEmotions();
+        const index = emotions.findIndex(emotion => emotion.id === this.selected);
+        if (index < 0) { if (this.viewer.open) this.viewer.close(); return; }
+        const emotion = emotions[index];
+        const url = imageUrl(this.profile, emotion.id);
+        if (this.viewerImage.getAttribute("src") !== url) this.viewerImage.src = url;
+        this.viewerImage.alt = emotionLabel(emotion);
+        this.viewerTitle.textContent = emotionLabel(emotion);
+        this.viewerCount.textContent = `${index + 1} / ${emotions.length}`;
+        this.viewerPrompt.textContent = emotion.prompt;
+        this.viewerPrevious.disabled = this.viewerNext.disabled = emotions.length < 2;
+    }
+
+    movePreview(direction) {
+        const emotions = this.previewEmotions();
+        if (emotions.length < 2) return;
+        const index = emotions.findIndex(emotion => emotion.id === this.selected);
+        this.select(emotions[(index + direction + emotions.length) % emotions.length].id);
     }
 
     field(parent, label, name, type, options, attributes = {}) {
@@ -366,7 +521,7 @@ class EmotionGallery {
                 if (card.parentNode !== subgroup.cards) subgroup.cards.append(card);
                 continue;
             }
-            const card = button("", "eg-card", () => this.select(emotion.id));
+            const card = button("", "eg-card", () => this.openPreview(emotion.id));
             card.setAttribute("aria-label", caption);
             card.classList.toggle("eg-card-custom", !!emotion.custom);
             const media = element("div", "eg-media");
@@ -670,7 +825,15 @@ class EmotionGallery {
         this.timer = setTimeout(() => this.openProfile(this.profile.id).catch(error => { this.error(error); this.schedulePoll(); }), this.profile.active ? 1200 : 5000);
     }
 
+    settingsChanged() {
+        if (!this.profile) return false;
+        const settings = this.profile.settings;
+        return this.inputs.model_family.value !== (settings.model_family ?? "checkpoint") || Object.entries(settings).some(([key, value]) => this.inputs[key] && String(value) !== this.inputs[key].value);
+    }
+
     renderNote() {
+        this.renderSettingsSummary();
+        this.generateButton.textContent = this.busy ? "Подготовка…" : this.profile && !this.settingsChanged() ? "Догенерировать набор" : "Создать галерею";
         this.note.hidden = !this.profile;
         if (!this.profile) {
             this.note.textContent = `В наборе ${this.config.emotions.length} выражений. Готовые карточки сохраняются на диске.`;
@@ -678,8 +841,7 @@ class EmotionGallery {
             return;
         }
         const settings = this.profile.settings;
-        const family = settings.model_family ?? "checkpoint";
-        const changed = this.inputs.model_family.value !== family || Object.entries(settings).some(([key, value]) => this.inputs[key] && String(value) !== this.inputs[key].value);
+        const changed = this.settingsChanged();
         const model = (settings.unet_name ?? settings.ckpt_name).split(/[\\/]/).pop();
         this.note.textContent = changed ? "Настройки изменены. Кнопка генерации создаст соответствующий набор; ниже показан сохранённый кеш." : `${model} · ${settings.width} × ${settings.height} · seed ${settings.seed}`;
         localize(this.dialog);
@@ -697,7 +859,6 @@ class EmotionGallery {
         this.deleteButton.disabled = this.busy || !profile || !!profile.active;
         this.restoreButton.hidden = !this.deleted;
         this.restoreButton.disabled = this.busy;
-        this.generateButton.textContent = this.busy ? "Подготовка…" : profile ? "Догенерировать набор" : "Создать галерею";
         this.cancelButton.hidden = !profile?.active;
         const labels = { missing: "Нет превью", ready: "В кеше", running: "Генерация…", pending: "В очереди", error: "Ошибка · повторить" };
         for (const emotion of this.config.emotions) {
@@ -705,6 +866,7 @@ class EmotionGallery {
             const entry = profile?.images[emotion.id];
             const state = profile?.states[emotion.id] ?? { status: entry ? "ready" : "missing" };
             item.card.classList.toggle("eg-active", emotion.id === this.selected);
+            item.card.classList.toggle("eg-card-ready", !!entry);
             item.card.classList.toggle("eg-generating", state.status === "running");
             item.card.setAttribute("aria-pressed", String(emotion.id === this.selected));
             item.card.title = state.message || emotion.prompt;
@@ -756,10 +918,13 @@ class EmotionGallery {
         this.selectionTitle.textContent = emotionLabel(emotion);
         this.promptText.textContent = emotion.prompt;
         this.preview.hidden = !this.profile?.images[emotion.id];
+        this.previewButton.hidden = this.preview.hidden;
+        this.enlargeButton.disabled = this.preview.hidden;
         if (!this.preview.hidden) {
             const url = imageUrl(this.profile, emotion.id, true);
             if (this.preview.getAttribute("src") !== url) this.preview.src = url;
         } else this.preview.removeAttribute("src");
+        if (this.viewer.open) this.renderPreview();
     }
 
     select(emotion) { this.selected = emotion; this.render(); }
@@ -774,9 +939,10 @@ class EmotionGallery {
         let failure;
         this.render();
         try {
-            const settings = force && this.profile ? { ...this.profile.settings, seed: String(this.profile.settings.seed) } : this.getSettings();
+            const profile = this.profile && (emotions !== undefined || force || !this.settingsChanged()) ? this.profile : null;
+            const settings = profile ? { ...profile.settings, seed: String(profile.settings.seed) } : this.getSettings();
             const seed = settings.seed;
-            const body = JSON.stringify({ client_id: api.clientId, settings: { ...settings, seed: "__EG_SEED__" }, emotions, force }).replace('"__EG_SEED__"', seed);
+            const body = JSON.stringify({ client_id: api.clientId, profile_id: profile?.id, settings: { ...settings, seed: "__EG_SEED__" }, emotions, force }).replace('"__EG_SEED__"', seed);
             const response = await api.fetchApi(`${ROOT}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
             const data = await response.json();
             if (!response.ok) {

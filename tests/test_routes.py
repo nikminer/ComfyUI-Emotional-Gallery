@@ -1,5 +1,6 @@
 import importlib
 import json
+import os
 import sys
 import types
 import unittest
@@ -151,17 +152,17 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_curated_defaults_skip_retired_variants(self):
         response = await self.client.get("/emotional-gallery/config")
         config = await response.json()
-        self.assertEqual(len(config["emotions"]), 81)
+        self.assertEqual(len(config["emotions"]), 131)
         self.assertTrue(all(item["label_en"] for item in config["emotions"] + config["categories"]))
         self.assertFalse({item["id"] for item in config["emotions"]} & test_gallery.emotions.RETIRED_EMOTIONS.keys())
         _, data = await self.generate()
-        self.assertEqual(data["queued"], 81)
+        self.assertEqual(data["queued"], 131)
         self.assertFalse({item[3]["eg_emotion"] for item in self.queue.pending} & test_gallery.emotions.RETIRED_EMOTIONS.keys())
 
     async def test_custom_emotion_creation_generation_and_cache_reuse(self):
         original = self.fixture.profile()
         self.store.save(original["id"], "smile", Image.new("RGB", (8, 8)))
-        response = await self.client.post("/emotional-gallery/emotions", json={"label": "Скепсис", "prompt": "skeptical expression"})
+        response = await self.client.post("/emotional-gallery/emotions", json={"label": "Свой скепсис", "prompt": "skeptical expression"})
         data = await response.json()
         self.assertEqual(response.status, 201)
         custom = data["emotion"]
@@ -258,6 +259,44 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(data["queued"], 4)
         self.assertEqual({item[3]["eg_emotion"] for item in self.queue.pending}, set(members) - {"ahegao"})
+
+    async def test_saved_group_keeps_cache_after_vae_timestamp_change(self):
+        settings = self.fixture.anima_settings()
+        profile = self.store.ensure_profile(settings, self.fixture.checkpoint, self.fixture.lora,
+                                            clip_path=self.fixture.clip, vae_path=self.fixture.vae)
+        added = {key for key, _, _ in test_gallery.emotions.ADDITIONAL_EMOTIONS["sfw"]}
+        members = [key for key, item in test_gallery.emotions.ACTIVE_EMOTION_MAP.items() if item["category"] == "sfw"]
+        for emotion in set(members) - added:
+            self.store.save(profile["id"], emotion, Image.new("RGB", (8, 8)))
+        original = self.store.image_path(profile["id"], "smile").read_bytes()
+        original_entry = self.store.read(profile["id"])["images"]["smile"]
+        stat = self.fixture.vae.stat()
+        os.utime(self.fixture.vae, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+
+        response, data = await self.generate(profile_id=profile["id"], emotions=members, settings={**settings, "seed": 99})
+        self.assertEqual(response.status, 200, data)
+        self.assertEqual(data["profile"]["id"], profile["id"])
+        self.assertEqual(data["queued"], 50)
+        self.assertEqual({item[3]["eg_emotion"] for item in self.queue.pending}, added)
+        self.assertEqual({item[3]["eg_profile"] for item in self.queue.pending}, {profile["id"]})
+        self.assertTrue(all(item[2]["6"]["inputs"]["seed"] == settings["seed"] for item in self.queue.pending))
+        self.assertEqual(self.store.image_path(profile["id"], "smile").read_bytes(), original)
+        self.assertEqual(self.store.read(profile["id"])["images"]["smile"], original_entry)
+        _, data = await self.generate(profile_id=profile["id"], emotions=members)
+        self.assertEqual(data["queued"], 0)
+
+        response, data = await self.generate(settings=settings, emotions=["smile"])
+        self.assertEqual(response.status, 200, data)
+        self.assertNotEqual(data["profile"]["id"], profile["id"])
+        self.assertEqual(data["queued"], 1)
+
+    async def test_invalid_saved_profile_never_creates_a_replacement_set(self):
+        for profile_id, status in (("../outside", 400), (True, 400), ("0" * 32, 404)):
+            with self.subTest(profile_id=profile_id):
+                response, _ = await self.generate(profile_id=profile_id, emotions=["smile"])
+                self.assertEqual(response.status, status)
+        self.assertEqual(self.queue.pending, [])
+        self.assertEqual(list(self.store.root.glob("*/manifest.json")), [])
 
     async def test_config_and_custom_creation_expose_nested_subcategories(self):
         config = await (await self.client.get("/emotional-gallery/config")).json()

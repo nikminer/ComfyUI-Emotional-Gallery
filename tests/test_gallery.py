@@ -186,9 +186,9 @@ class GalleryTests(unittest.TestCase):
     def test_custom_library_persists_without_invalidating_existing_cache(self):
         original = self.profile()
         image = self.store.save(original["id"], "smile", Image.new("RGB", (8, 8)))
-        custom = self.store.add_emotion("  Скепсис  ", "  skeptical expression  ")
+        custom = self.store.add_emotion("  Свой скепсис  ", "  skeptical expression  ")
         reopened = gallery.GalleryStore(self.store.root)
-        self.assertEqual(reopened.emotions()[custom["id"]]["label"], "Скепсис")
+        self.assertEqual(reopened.emotions()[custom["id"]]["label"], "Свой скепсис")
         self.assertEqual(custom["prompt"], "skeptical expression")
         updated = self.profile()
         self.assertEqual(updated["id"], original["id"])
@@ -197,7 +197,7 @@ class GalleryTests(unittest.TestCase):
         self.assertEqual(len(reopened.public(updated)["emotions"]), len(emotions.ACTIVE_EMOTION_MAP) + 1)
 
     def test_custom_recipe_and_cache_keep_expression_snapshot(self):
-        custom = self.store.add_emotion("Скепсис", "skeptical expression, one eyebrow raised")
+        custom = self.store.add_emotion("Свой скепсис", "skeptical expression, one eyebrow raised")
         profile = self.profile()
         recipe = gallery.build_prompt(self.settings, profile["id"], custom["id"], custom)
         self.assertEqual(recipe["2"]["inputs"]["emotion"], "custom")
@@ -217,8 +217,8 @@ class GalleryTests(unittest.TestCase):
         for label, prompt in (("", "expression"), ("name", ""), ("x" * 81, "expression"), ("name", "x" * 4001), (None, "expression")):
             with self.subTest(label=label), self.assertRaises(ValueError):
                 self.store.add_emotion(label, prompt)
-        self.store.add_emotion("Скепсис", "skeptical expression")
-        for label in ("  СКЕПСИС  ", emotions.EMOTION_MAP["smile"]["label"]):
+        self.store.add_emotion("Свой скепсис", "skeptical expression")
+        for label in ("  СВОЙ СКЕПСИС  ", emotions.EMOTION_MAP["smile"]["label"]):
             with self.assertRaises(ValueError):
                 self.store.add_emotion(label, "expression")
 
@@ -233,12 +233,12 @@ class GalleryTests(unittest.TestCase):
         profile = self.profile()
         legacy = {key: {"id": key, "label": label, "prompt": prompt} for key, label, prompt in emotions.EMOTIONS}
         self.assertEqual(profile["identity"]["emotions"], legacy)
-        self.assertEqual(len(emotions.ACTIVE_EMOTION_MAP), 81)
-        self.assertEqual(len({item["label"] for item in emotions.ACTIVE_EMOTION_MAP.values()}), 81)
+        self.assertEqual(len(emotions.ACTIVE_EMOTION_MAP), 131)
+        self.assertEqual(len({item["label"] for item in emotions.ACTIVE_EMOTION_MAP.values()}), 131)
         self.assertTrue(all(item["category"] in emotions.CATEGORIES for item in emotions.ACTIVE_EMOTION_MAP.values()))
 
     def test_custom_category_persists_and_rejects_unknown_values(self):
-        custom = self.store.add_emotion("Скепсис", "skeptical expression", "confidence")
+        custom = self.store.add_emotion("Свой скепсис", "skeptical expression", "confidence")
         self.assertEqual(gallery.GalleryStore(self.store.root).emotions()[custom["id"]]["category"], "sfw")
         with self.assertRaises(ValueError):
             self.store.add_emotion("Name", "expression", "../outside")
@@ -257,7 +257,7 @@ class GalleryTests(unittest.TestCase):
         self.assertEqual(next(item for item in self.store.public(profile)["emotions"] if item["id"] == custom["id"])["category"], "sfw")
         self.assertEqual(path.read_bytes(), original)
         self.assertEqual(set(emotions.CATEGORIES), {"sfw", "nsfw"})
-        self.assertEqual(sum(item["category"] == "sfw" for item in emotions.ACTIVE_EMOTION_MAP.values()), 49)
+        self.assertEqual(sum(item["category"] == "sfw" for item in emotions.ACTIVE_EMOTION_MAP.values()), 99)
 
     def test_curated_library_has_distinct_prompts_and_english_labels(self):
         definitions = list(emotions.ACTIVE_EMOTION_MAP.values())
